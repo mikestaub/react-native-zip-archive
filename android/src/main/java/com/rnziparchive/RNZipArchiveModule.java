@@ -11,6 +11,9 @@ import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
 
+import org.apache.commons.compress.archivers.ArchiveEntry;
+import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream;
+
 import java.io.BufferedOutputStream;
 import java.io.BufferedInputStream;
 import java.io.File;
@@ -180,44 +183,33 @@ public class RNZipArchiveModule extends ReactContextBaseJavaModule {
   }
 
   private void unzipStream(String zipFilePath, String destDirectory, InputStream inputStream, long totalSize) throws Exception {
-    try {
-      File destDir = new File(destDirectory);
-      if (!destDir.exists()) {
-        destDir.mkdirs();
-      }
-      ZipInputStream zipIn = new ZipInputStream(inputStream);
-      BufferedInputStream bin = new BufferedInputStream(zipIn);
+    BufferedOutputStream dest = null;
+    int chunkSize = 8192;
+    boolean allowStoredEntriesWithDataDescriptor = true;
+    ZipArchiveInputStream zipIn = new ZipArchiveInputStream(
+      new BufferedInputStream(inputStream),
+      null,
+      false,
+      allowStoredEntriesWithDataDescriptor
+    );
 
-      ZipEntry entry;
-
-      long extractedBytes = 0;
-
-      updateProgress(0, 1, zipFilePath); // force 0%
-      File fout=null;
-      while((entry = zipIn.getNextEntry())!=null){
-        if(entry.isDirectory()) continue;
-        fout=new File(destDirectory, entry.getName());
-        if(!fout.exists()){
-          (new File(fout.getParent())).mkdirs();
+    ArchiveEntry entry = null;
+    while ((entry = zipIn.getNextZipEntry()) != null) {
+      if (!entry.isDirectory()) {
+        File f = new File(destDirectory, entry.getName());
+        f.getParentFile().mkdirs();
+        int count;
+        byte data[] = new byte[chunkSize];
+        FileOutputStream out = new FileOutputStream(f);
+        dest = new BufferedOutputStream(out, chunkSize);
+        while ((count = zipIn.read(data, 0, chunkSize)) != -1) {
+          dest.write(data, 0, count);
         }
-        FileOutputStream out=new FileOutputStream(fout);
-        BufferedOutputStream Bout=new BufferedOutputStream(out);
-        int b;
-        while((b=bin.read())!=-1){
-          Bout.write(b);
-        }
-        Bout.close();
-        out.close();
+        dest.flush();
+        dest.close();
       }
-
-      updateProgress(1, 1, zipFilePath); // force 100%
-      bin.close();
-      zipIn.close();
-    } catch (Exception ex) {
-      ex.printStackTrace();
-      updateProgress(0, 1, zipFilePath); // force 0%
-      throw new Exception(String.format("Couldn't extract %s", zipFilePath));
     }
+    zipIn.close();
   }
 
   private void updateProgress(long extractedBytes, long totalSize, String zipFilePath) {
